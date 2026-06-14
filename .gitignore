@@ -3,3 +3,4 @@
 *.htm
 build
 app.*
+node_modules
