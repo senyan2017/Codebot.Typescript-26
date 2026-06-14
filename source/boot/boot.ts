@@ -118,7 +118,7 @@ class Boot {
             if (target == undefined || target.length < 1)
                 return false;
             let desktop = typeof window.orientation == "undefined";
-            return target == "mobile" ? desktop : !desktop; 
+            return target == "mobile" ? desktop : !desktop;
         }
 
         function slice(items): Array<HTMLElement> {
@@ -140,9 +140,12 @@ class Boot {
         }
         for (let item of includes) {
             var src = item.getAttribute("src");
-            if (src == null) 
-                 break;
-            if (src != null && src.endsWith(".css")) {
+            if (src == null || src.length < 1) {
+                console.warn("[boot] include node missing src, skipping:", item);
+                load();
+                continue;
+            }
+            if (src.endsWith(".css")) {
                 item.parentNode?.removeChild(item);
                 if (me.sources.indexOf(src) > -1 || InvalidTarget(item)) {
                     load();
@@ -153,10 +156,14 @@ class Boot {
                 link.rel = "stylesheet";
                 link.type = "text/css";
                 link.onload = () => { load(); };
+                link.onerror = () => {
+                    console.warn("[boot] failed to load css:", src);
+                    load();
+                };
                 document.getElementsByTagName("head")[0].appendChild(link);
                 link.href = src;
             }
-            else if (src && src.endsWith(".js")) {
+            else if (src.endsWith(".js")) {
                 item.parentNode?.removeChild(item);
                 if (me.sources.indexOf(src) > -1 || InvalidTarget(item)) {
                     load();
@@ -166,20 +173,34 @@ class Boot {
                 let script = document.createElement("script");
                 script.type = "text/javascript";
                 script.onload = () => { load(); };
+                script.onerror = () => {
+                    console.warn("[boot] failed to load script:", src);
+                    load();
+                };
                 document.body.appendChild(script);
                 script.src = src;
             }
             else {
+                if (me.sources.indexOf(src) > -1) {
+                    item.parentNode?.removeChild(item);
+                    load();
+                    continue;
+                }
+                me.sources.push(src);
                 let parent = item.parentNode;
                 let next = item.nextSibling;
                 parent?.removeChild(item);
                 me.open(src, (result: string, includeNode: HTMLElement) => {
-                    includeNode.innerHTML = result;
-                    let nodes = slice(includeNode.children);
-                    while (nodes.length) {
-                        let node = nodes.shift();
-                        if (node)
-                            parent?.insertBefore(node, next);
+                    if (result != null) {
+                        includeNode.innerHTML = result;
+                        let nodes = slice(includeNode.children);
+                        while (nodes.length) {
+                            let node = nodes.shift();
+                            if (node)
+                                parent?.insertBefore(node, next);
+                        }
+                    } else {
+                        console.warn("[boot] failed to load include:", src);
                     }
                     load();
                 }, item);
@@ -229,14 +250,18 @@ class Boot {
         }
         for (let key of me.modules) {
             let module = entries[key];
-            if (!module || window[module.url] || me.sources.indexOf(module.url) > -1) {
+            if (!module || window[module.identifier] || me.sources.indexOf(module.url) > -1) {
                 load();
                 continue;
             }
             me.sources.push(module.url);
             let script = document.createElement("script");
             script.type = "text/javascript";
-            script.onload = () => { load(); }
+            script.onload = () => { load(); };
+            script.onerror = () => {
+                console.warn("[boot] failed to load module:", key, module.url);
+                load();
+            };
             document.body.appendChild(script);
             script.src = module.url;
         }
@@ -261,14 +286,18 @@ class Boot {
             return;
         }
         for (let src of me.requires) {
-            if (!src || window[src] || me.sources.indexOf(src) > -1) {
+            if (!src || me.sources.indexOf(src) > -1) {
                 load();
                 continue;
             }
             me.sources.push(src);
             let script = document.createElement("script");
             script.type = "text/javascript";
-            script.onload = () => { load(); }
+            script.onload = () => { load(); };
+            script.onerror = () => {
+                console.warn("[boot] failed to load require:", src);
+                load();
+            };
             document.body.appendChild(script);
             script.src = src;
         }
@@ -282,7 +311,7 @@ class Boot {
             if (meta.getAttribute("name") == "boot")
                 return meta.getAttribute("content") ?? "";
         }
-        return "/typescript/build/app.js";
+        return "build/app.js";
     }
 
     /** @internal */
@@ -293,11 +322,20 @@ class Boot {
         window["boot"] = me;
         me.processIncludes();
         window.addEventListener("DOMContentLoaded", () => {
+            let appSrc = this.app();
+            if (!appSrc || appSrc.length < 1) {
+                me.processUses();
+                return;
+            }
             let script = document.createElement("script");
             script.type = "text/javascript";
             script.onload = () => me.processUses();
+            script.onerror = () => {
+                console.warn("[boot] failed to load app:", appSrc);
+                me.processUses();
+            };
             document.body.appendChild(script);
-            script.src = this.app();
+            script.src = appSrc;
         });
     }
 
@@ -305,8 +343,17 @@ class Boot {
         let request = new XMLHttpRequest();
         request.open("GET", url, true);
         request.onload = () => {
-            onload(request.response, state);
-        }
+            if (request.status >= 200 && request.status < 400) {
+                onload(request.response, state);
+            } else {
+                console.warn("[boot] request failed with status", request.status, "for:", url);
+                onload(null as any, state);
+            }
+        };
+        request.onerror = () => {
+            console.warn("[boot] network error loading:", url);
+            onload(null as any, state);
+        };
         request.send();
     }
 

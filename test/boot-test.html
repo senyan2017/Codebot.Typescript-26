@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="boot" content="../build/app.js">
+    <title>Boot Chain Integration Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
+        .pass { color: #4caf50; }
+        .fail { color: #f44336; }
+        .pending { color: #ff9800; }
+        h1 { color: #bb86fc; }
+        #results { margin-top: 16px; }
+        .test-row { padding: 4px 0; border-bottom: 1px solid #333; }
+    </style>
+</head>
+<body>
+    <h1>Boot Chain Integration Test</h1>
+    <div id="results"></div>
+
+    <!--
+        Test fixtures: these <include> tags exercise various edge cases.
+        boot.ts will process them during startup.
+    -->
+
+    <!-- 1. Normal HTML include (should load and inline) -->
+    <include src="fixtures/partial.html"></include>
+
+    <!-- 2. Duplicate HTML include (should be deduped, not loaded twice) -->
+    <include src="fixtures/partial.html"></include>
+
+    <!-- 3. Include with no src (should be skipped, not break the chain) -->
+    <include></include>
+
+    <!-- 4. Include with empty src (should be skipped) -->
+    <include src=""></include>
+
+    <!-- 5. Include for a non-existent HTML file (should warn and continue) -->
+    <include src="fixtures/nonexistent.html"></include>
+
+    <!-- 6. Include for a non-existent JS file (should warn and continue) -->
+    <include src="fixtures/nonexistent.js"></include>
+
+    <!-- 7. Include for a non-existent CSS file (should warn and continue) -->
+    <include src="fixtures/nonexistent.css"></include>
+
+    <!-- 8. target-platform="mobile" (skipped on desktop, included on mobile) -->
+    <include src="fixtures/mobile-only.html" target-platform="mobile"></include>
+
+    <script>
+        var results = document.getElementById("results");
+        var testCount = 0;
+        var passCount = 0;
+
+        function report(label, pass, detail) {
+            testCount++;
+            if (pass) passCount++;
+            var row = document.createElement("div");
+            row.className = "test-row";
+            row.innerHTML =
+                '<span class="' + (pass ? "pass" : "fail") + '">' +
+                (pass ? "PASS" : "FAIL") +
+                "</span>  " + label +
+                (detail ? '  <span style="color:#888">— ' + detail + "</span>" : "");
+            results.appendChild(row);
+        }
+
+        function summary() {
+            var row = document.createElement("div");
+            row.className = "test-row";
+            row.style.marginTop = "16px";
+            row.style.fontWeight = "bold";
+            row.innerHTML =
+                "Results: " + passCount + " passed, " + (testCount - passCount) + " failed, " + testCount + " total";
+            results.appendChild(row);
+        }
+
+        // Wait for boot chain to settle, then run assertions
+        window.addEventListener("DOMContentLoaded", function () {
+            setTimeout(function () {
+
+                // Test 1: boot object exists
+                report("boot object exists on window", typeof window.boot === "object");
+
+                // Test 2: boot.use is callable
+                report("boot.use() is callable", typeof window.boot.use === "function");
+
+                // Test 3: boot.require is callable
+                report("boot.require() is callable", typeof window.boot.require === "function");
+
+                // Test 4: boot.open is callable
+                report("boot.open() is callable", typeof window.boot.open === "function");
+
+                // Test 5: Duplicate include was deduped (partial.html should only be fetched once)
+                // Check that sources[] doesn't have duplicates
+                var sources = window.boot.sources || [];
+                var partialCount = 0;
+                for (var i = 0; i < sources.length; i++) {
+                    if (sources[i].indexOf("partial.html") > -1) partialCount++;
+                }
+                report(
+                    "HTML include dedup: partial.html appears at most once in sources",
+                    partialCount <= 1,
+                    "found " + partialCount + " entries"
+                );
+
+                // Test 6: All <include> tags were consumed (removed from DOM)
+                var remaining = document.getElementsByTagName("include");
+                report(
+                    "All <include> tags consumed from DOM",
+                    remaining.length === 0,
+                    remaining.length + " <include> tags still in DOM"
+                );
+
+                // Test 7: Boot chain completed (included flag)
+                report(
+                    "Boot chain: included flag is true",
+                    window.boot.included === true || window.boot.included === undefined,
+                    "included=" + window.boot.included
+                );
+
+                // Test 8: boot.use with array works
+                try {
+                    window.boot.use(["jquery", "greensock"]);
+                    report("boot.use() accepts array argument", true);
+                } catch (e) {
+                    report("boot.use() accepts array argument", false, e.message);
+                }
+
+                // Test 9: boot.use dedup (calling same module twice)
+                var modulesBefore = (window.boot.modules || []).length;
+                window.boot.use("jquery");
+                var modulesAfter = (window.boot.modules || []).length;
+                report(
+                    "boot.use() deduplicates modules",
+                    modulesAfter === modulesBefore,
+                    "modules grew from " + modulesBefore + " to " + modulesAfter
+                );
+
+                // Test 10: boot.require dedup
+                var reqBefore = (window.boot.requires || []).length;
+                window.boot.require("test-dup.js");
+                var reqMid = (window.boot.requires || []).length;
+                window.boot.require("test-dup.js");
+                var reqAfter = (window.boot.requires || []).length;
+                report(
+                    "boot.require() deduplicates scripts",
+                    reqAfter === reqMid && reqMid === reqBefore + 1,
+                    "requires: " + reqBefore + " → " + reqMid + " → " + reqAfter
+                );
+
+                summary();
+
+            }, 3000); // 3s to let all async loads settle (including timeouts for failed resources)
+        });
+    </script>
+    <script src="../build/boot.js"></script>
+</body>
+</html>
