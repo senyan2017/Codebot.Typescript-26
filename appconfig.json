@@ -4,7 +4,14 @@
         "sourceMap": true,
         "outFile": "build/app.js",
         "removeComments": true,
-        "lib": ["dom", "es6"]
+        "lib": ["dom", "es6"],
+        "rootDir": "source",
+        "ignoreDeprecations": "6.0",
+        "strict": false,
+        "noImplicitAny": false,
+        "strictNullChecks": false,
+        "noImplicitThis": false,
+        "strictPropertyInitialization": false
     },
     "include": [
         "**/app/app.ts"
